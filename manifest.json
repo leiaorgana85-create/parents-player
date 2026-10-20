@@ -1,0 +1,20 @@
+{
+  "id": "/parents-player/",
+  "name": "불교경전",
+  "short_name": "불교경전",
+  "description": "Google Drive 불경 오디오 오프라인 플레이어",
+  "lang": "ko",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#0d0d0e",
+  "theme_color": "#111111",
+  "icons": [
+    {
+      "src": "app-icon.png",
+      "sizes": "1254x1254",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}

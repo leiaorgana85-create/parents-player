@@ -1,0 +1,19 @@
+.section-head { display: grid; grid-template-columns: minmax(0, 1fr) 54px 60px; align-items: center; column-gap: 8px; }
+.library-mode-tabs { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.library-mode-btn, .playlist-edit-btn { border: 1px solid var(--border); background: transparent; color: var(--muted); border-radius: 999px; min-height: 28px; padding: 5px 9px; font-size: 11px; font-weight: 750; line-height: 1; white-space: nowrap; }
+.library-mode-btn.active { color: var(--text); border-color: #5d5d65; background: rgba(255,255,255,.05); }
+.library-mode-btn:disabled { opacity: .58; }
+.playlist-edit-btn { margin: 0; width: 54px; justify-self: end; }
+.track-count { width: 60px; text-align: right; justify-self: end; white-space: nowrap; overflow: hidden; text-overflow: clip; }
+.playlist-hidden { display: none !important; }
+.track-row.playlist-edit-row { grid-template-columns: 42px minmax(0, 1fr) 32px 28px; }
+.playlist-check { width: 24px; height: 24px; border: 1px solid #5d5d65; border-radius: 50%; background: transparent; color: var(--bg); padding: 0; display: grid; place-items: center; font-size: 14px; font-weight: 900; }
+.playlist-check.selected { background: var(--text); border-color: var(--text); }
+.playlist-member:not(.playing) .track-title { color: var(--text); }
+@media (max-width: 460px) {
+  .section-head { grid-template-columns: minmax(0, 1fr) 52px 58px; column-gap: 7px; }
+  .library-mode-tabs { gap: 4px; }
+  .library-mode-btn, .playlist-edit-btn { min-height: 27px; padding: 5px 8px; font-size: 10px; }
+  .playlist-edit-btn { width: 52px; }
+  .track-count { width: 58px; }
+}

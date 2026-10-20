@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#111111" />
+  <title>불경 듣기 초기화</title>
+  <style>
+    :root { color-scheme: dark; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Noto Sans KR", sans-serif; }
+    body { margin: 0; min-height: 100vh; background: #0d0d0e; color: #f4f4f5; display: grid; place-items: center; padding: 24px; box-sizing: border-box; }
+    main { width: min(420px, 100%); }
+    h1 { font-size: 22px; margin: 0 0 10px; }
+    p { color: #a4a4ad; line-height: 1.55; margin: 0; }
+    #detail { margin-top: 10px; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>불경 듣기 초기화 중…</h1>
+    <p id="status">이 기기에 저장된 불경 듣기 데이터만 삭제합니다. Google Drive 원본은 건드리지 않습니다.</p>
+    <p id="detail"></p>
+  </main>
+  <script>
+    (() => {
+      'use strict';
+
+      const DB_NAMES = ['parents-player-audio-db', 'parents-player-db'];
+      const LOCAL_KEYS = [
+        'parentsPlayerSettings',
+        'parentsPlayerPositions',
+        'parentsPlayerPlaybackSpeed',
+        'parentsPlayerRepeatMode',
+        'parentsPlayerPlaylistV1',
+        'parentsPlayerViewMode',
+        'parentsPlayerGoogleAccessToken',
+        'parentsPlayerGoogleAuthorized',
+        'parentsPlayerGoogleForceConsent'
+      ];
+      const STATUS = document.getElementById('status');
+      const DETAIL = document.getElementById('detail');
+
+      function sleep(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+      }
+
+      function formatBytes(value) {
+        const n = Number(value || 0);
+        if (!Number.isFinite(n) || n <= 0) return '0 MB';
+        if (n >= 1024 ** 3) return `${(n / 1024 ** 3).toFixed(2)} GB`;
+        if (n >= 1024 ** 2) return `${(n / 1024 ** 2).toFixed(1)} MB`;
+        return `${Math.round(n / 1024)} KB`;
+      }
+
+      async function estimateUsage() {
+        try {
+          const estimate = await navigator.storage?.estimate?.();
+          return Number.isFinite(estimate?.usage) ? estimate.usage : null;
+        } catch {
+          return null;
+        }
+      }
+
+      function deleteDatabaseOnce(name) {
+        return new Promise((resolve, reject) => {
+          const request = indexedDB.deleteDatabase(name);
+          request.onsuccess = resolve;
+          request.onerror = () => reject(request.error || new Error(`${name} 삭제에 실패했습니다.`));
+          request.onblocked = () => reject(new Error(`${name}이 다른 불경 듣기 창에서 사용 중입니다.`));
+        });
+      }
+
+      async function deleteDatabase(name) {
+        let lastError = null;
+        for (let attempt = 0; attempt < 5; attempt += 1) {
+          try {
+            await deleteDatabaseOnce(name);
+            return;
+          } catch (error) {
+            lastError = error;
+            await sleep(150 * (attempt + 1));
+          }
+        }
+        throw lastError || new Error(`${name} 삭제에 실패했습니다.`);
+      }
+
+      async function reset() {
+        const before = await estimateUsage();
+
+        for (const name of DB_NAMES) {
+          DETAIL.textContent = `${name} 삭제 중…`;
+          await deleteDatabase(name);
+        }
+
+        for (const key of LOCAL_KEYS) localStorage.removeItem(key);
+        for (let i = sessionStorage.length - 1; i >= 0; i -= 1) {
+          const key = sessionStorage.key(i);
+          if (key && /^parentsPlayer/i.test(key)) sessionStorage.removeItem(key);
+        }
+
+        if ('caches' in window) {
+          const cacheKeys = await caches.keys();
+          await Promise.all(
+            cacheKeys
+              .filter(key => key.startsWith('parents-player-v'))
+              .map(key => caches.delete(key))
+          );
+        }
+
+        if ('serviceWorker' in navigator) {
+          try {
+            const registrations = await navigator.serviceWorker.getRegistrations();
+            const scope = `${location.origin}/parents-player/`;
+            await Promise.all(
+              registrations
+                .filter(registration => registration.scope.startsWith(scope))
+                .map(registration => registration.unregister())
+            );
+          } catch {}
+        }
+
+        await sleep(500);
+        const after = await estimateUsage();
+        const beforeText = before == null ? '확인 불가' : formatBytes(before);
+        const afterText = after == null ? '확인 불가' : formatBytes(after);
+
+        STATUS.textContent = '초기화가 완료되었습니다.';
+        DETAIL.textContent = `브라우저 저장공간 추정치: ${beforeText} → ${afterText}`;
+        await sleep(900);
+        location.replace(`./?fresh=${Date.now()}`);
+      }
+
+      reset().catch(error => {
+        console.error(error);
+        STATUS.textContent = '초기화를 완료하지 못했습니다.';
+        DETAIL.textContent = `${error?.message || '저장공간 오류가 발생했습니다.'} 다른 불경 듣기 창을 닫고 다시 시도해 주세요.`;
+      });
+    })();
+  </script>
+</body>
+</html>
