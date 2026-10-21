@@ -1,5 +1,5 @@
 const CACHE_PREFIX = 'parents-player-v';
-const CACHE = 'parents-player-v31';
+const CACHE = 'parents-player-v32';
 const MEDIA_CONTROLS_JS = './media-session-controls.js?v=3';
 const SHELL = [
   './',
@@ -14,6 +14,7 @@ const SHELL = [
   './playlist.js?v=2',
   './app.js?v=5',
   './ui-fixes.js?v=2',
+  './now-playing-fullscreen.js?v=1',
   MEDIA_CONTROLS_JS,
   './reset.html',
   './manifest.json?v=6',
