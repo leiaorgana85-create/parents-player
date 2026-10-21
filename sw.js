@@ -1,6 +1,6 @@
 const CACHE_PREFIX = 'parents-player-v';
-const CACHE = 'parents-player-v33';
-const MEDIA_CONTROLS_JS = './media-session-controls.js?v=3';
+const CACHE = 'parents-player-v34';
+const MEDIA_CONTROLS_JS = './media-session-controls.js?v=4';
 const SHELL = [
   './',
   './index.html',
@@ -53,7 +53,7 @@ async function injectMediaControls(response) {
   headers.delete('etag');
   const html = text.includes('media-session-controls.js')
     ? text
-    : text.replace('</body>', '  <script src="./media-session-controls.js?v=3" defer></script>\n</body>');
+    : text.replace('</body>', '  <script src="./media-session-controls.js?v=4" defer></script>\n</body>');
   return new Response(html, { status: response.status, statusText: response.statusText, headers });
 }
 
