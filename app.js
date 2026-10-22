@@ -1,8 +1,8 @@
 (() => {
   'use strict';
 
-  const DEFAULT_CLIENT_ID = '620289818773-nsdjjvi232l5n9v10ec6bdee3kp0jb8l.apps.googleusercontent.com';
   const DEFAULT_FOLDER_ID = '1LkvFEALAV1penT439jh5NyM7ilsG9TC6';
+  const API_KEY_STORAGE = 'parentsPlayerPublicApiKey';
   const DB_NAME = 'parents-player-db';
   const DB_VERSION = 1;
   const SETTINGS_KEY = 'parentsPlayerSettings';
@@ -14,7 +14,7 @@
   const els = Object.fromEntries([
     'syncBtn','settingsBtn','statusTitle','statusDetail','trackCount','trackList','emptyState','player','nowTitle','nowStatus',
     'speed1Btn','speed2Btn','repeatBtn','seek','timeCurrent','timeTotal','prevBtn','backBtn','playBtn','forwardBtn','nextBtn','audio',
-    'settingsDialog','settingsForm','clientIdInput','folderIdInput','offlineStats','storageEstimate','driveStorageStatus',
+    'settingsDialog','settingsForm','apiKeyInput','folderIdInput','offlineStats','storageEstimate','driveStorageStatus',
     'deleteOfflineBtn','factoryResetBtn','storageResult','saveSettingsBtn'
   ].map(id => [id, document.getElementById(id)]));
 
@@ -23,8 +23,6 @@
   let audioRows = new Map();
   let currentId = null;
   let currentUrl = null;
-  let accessToken = null;
-  let tokenClient = null;
   let seekDragging = false;
   let savePositionTimer = null;
   let settings = loadSettings();
@@ -37,18 +35,29 @@
 
   function loadSettings() {
     try {
-      return {
-        clientId: DEFAULT_CLIENT_ID,
-        folderId: DEFAULT_FOLDER_ID,
-        ...JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}')
-      };
+      const stored = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}') || {};
+      return { folderId: String(stored.folderId || DEFAULT_FOLDER_ID).trim() || DEFAULT_FOLDER_ID };
     } catch {
-      return { clientId: DEFAULT_CLIENT_ID, folderId: DEFAULT_FOLDER_ID };
+      return { folderId: DEFAULT_FOLDER_ID };
     }
   }
 
   function saveSettings() {
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ folderId: settings.folderId || DEFAULT_FOLDER_ID }));
+  }
+
+  function readApiKey() {
+    return String(localStorage.getItem(API_KEY_STORAGE) || '').trim();
+  }
+
+  function validApiKey(value = readApiKey()) {
+    return /^AIza[\w-]{20,}$/.test(String(value || '').trim());
+  }
+
+  function cleanLegacyAuthState() {
+    localStorage.removeItem('parentsPlayerGoogleAccessToken');
+    localStorage.removeItem('parentsPlayerGoogleAuthorized');
+    localStorage.removeItem('parentsPlayerGoogleForceConsent');
   }
 
   function cleanTitle(name = '') {
@@ -260,8 +269,8 @@
     await updateStorageEstimate();
     if (els.driveStorageStatus) {
       if (!navigator.onLine) els.driveStorageStatus.textContent = '오프라인';
-      else if (accessToken) els.driveStorageStatus.textContent = '연결됨';
-      else els.driveStorageStatus.textContent = '설정됨';
+      else if (validApiKey()) els.driveStorageStatus.textContent = '연결됨';
+      else els.driveStorageStatus.textContent = 'API 키 필요';
     }
   }
 
@@ -316,60 +325,13 @@
     });
   }
 
-  async function loadGoogleIdentity() {
-    if (window.google?.accounts?.oauth2) return;
-    if (!navigator.onLine) throw new Error('인터넷에 연결한 후 다시 시도하세요.');
-    await new Promise((resolve, reject) => {
-      const existing = document.querySelector('script[data-google-identity]');
-      if (existing) {
-        existing.addEventListener('load', resolve, { once: true });
-        existing.addEventListener('error', reject, { once: true });
-        return;
-      }
-      const script = document.createElement('script');
-      script.src = 'https://accounts.google.com/gsi/client';
-      script.async = true;
-      script.defer = true;
-      script.dataset.googleIdentity = '1';
-      script.onload = resolve;
-      script.onerror = () => reject(new Error('Google 로그인 기능을 불러오지 못했습니다.'));
-      document.head.appendChild(script);
-    });
-  }
-
-  async function ensureToken(interactive = true) {
-    if (accessToken) return accessToken;
-    if (!settings.clientId) throw new Error('고급 설정의 Google OAuth Client ID가 비어 있습니다.');
-    await loadGoogleIdentity();
-    return new Promise((resolve, reject) => {
-      tokenClient = google.accounts.oauth2.initTokenClient({
-        client_id: settings.clientId,
-        scope: 'https://www.googleapis.com/auth/drive.readonly',
-        callback: response => {
-          if (response.error) return reject(new Error(response.error_description || response.error));
-          accessToken = response.access_token;
-          resolve(accessToken);
-        },
-        error_callback: err => reject(new Error(err?.message || 'Google Drive 연결이 필요합니다.'))
-      });
-      tokenClient.requestAccessToken({ prompt: interactive ? 'consent' : '' });
-    });
-  }
-
   async function driveFetch(url, options = {}) {
-    const token = await ensureToken(false).catch(() => ensureToken(true));
-    let response = await fetch(url, {
-      ...options,
-      headers: { ...(options.headers || {}), Authorization: `Bearer ${token}` }
-    });
-    if (response.status === 401) {
-      accessToken = null;
-      const fresh = await ensureToken(true);
-      response = await fetch(url, {
-        ...options,
-        headers: { ...(options.headers || {}), Authorization: `Bearer ${fresh}` }
-      });
-    }
+    const key = readApiKey();
+    if (!validApiKey(key)) throw new Error('설정에서 Google Drive API 키를 한 번 저장해 주세요.');
+
+    const target = new URL(url);
+    target.searchParams.set('key', key);
+    const response = await fetch(target.toString(), options);
     if (!response.ok) {
       let message = '';
       try { message = (await response.json())?.error?.message || ''; } catch {}
@@ -420,7 +382,7 @@
     els.syncBtn.textContent = '업데이트 중…';
 
     try {
-      updateStatus('Google Drive 확인 중…', '처음 연결하는 경우 Google 로그인이 한 번 필요합니다.');
+      updateStatus('Google Drive 확인 중…', 'PLAYLIST 폴더를 확인하고 있습니다.');
       const incoming = await listDriveFolder();
 
       if (!incoming.length) {
@@ -623,7 +585,7 @@
   }
 
   function openSettings() {
-    els.clientIdInput.value = settings.clientId || DEFAULT_CLIENT_ID;
+    if (els.apiKeyInput) els.apiKeyInput.value = readApiKey();
     els.folderIdInput.value = settings.folderId || DEFAULT_FOLDER_ID;
     updateSettingsStatus();
     if (els.storageResult) els.storageResult.textContent = '';
@@ -694,19 +656,18 @@
   });
 
   els.saveSettingsBtn.addEventListener('click', () => {
-    const previousClientId = settings.clientId || DEFAULT_CLIENT_ID;
-    const nextClientId = els.clientIdInput.value.trim() || DEFAULT_CLIENT_ID;
-    settings.clientId = nextClientId;
+    const nextKey = String(els.apiKeyInput?.value || '').trim();
+    if (nextKey && !validApiKey(nextKey)) {
+      alert('Google Drive API 키 형식이 올바르지 않습니다. AIza로 시작하는 키를 확인해 주세요.');
+      return;
+    }
+    if (nextKey) localStorage.setItem(API_KEY_STORAGE, nextKey);
+    else localStorage.removeItem(API_KEY_STORAGE);
     settings.folderId = els.folderIdInput.value.trim() || DEFAULT_FOLDER_ID;
     saveSettings();
-    accessToken = null;
-    tokenClient = null;
-    if (nextClientId !== previousClientId) {
-      localStorage.removeItem('parentsPlayerGoogleAccessToken');
-      localStorage.removeItem('parentsPlayerGoogleAuthorized');
-      localStorage.removeItem('parentsPlayerGoogleForceConsent');
-    }
+    cleanLegacyAuthState();
     updateStatus('고급 설정을 저장했습니다', '다음 업데이트 때 새 설정을 사용합니다.');
+    updateSettingsStatus();
   });
 
   els.deleteOfflineBtn.addEventListener('click', deleteAllOfflineAudio);
@@ -786,6 +747,9 @@
   });
 
   async function boot() {
+    cleanLegacyAuthState();
+    saveSettings();
+
     if ('serviceWorker' in navigator) {
       try {
         const registration = await navigator.serviceWorker.register('./sw.js');
