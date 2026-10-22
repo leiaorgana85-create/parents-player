@@ -111,6 +111,7 @@
       els.syncBtn.disabled = false;
       els.saveSettingsBtn.disabled = false;
       if (els.factoryResetBtn) els.factoryResetBtn.disabled = false;
+      render();
     }
   }
 
@@ -711,7 +712,7 @@
     els.audio.currentTime = Math.min(els.audio.duration || Infinity, (els.audio.currentTime || 0) + 15);
   });
   els.playBtn.addEventListener('click', () => {
-    if (!currentId && library[0]) return playTrack(library[0].id);
+    if (!currentId && playableQueue()[0]) return playTrack(playableQueue()[0].id);
     els.audio.paused ? resumeAudio() : els.audio.pause();
   });
 
