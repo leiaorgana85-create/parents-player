@@ -1,6 +1,7 @@
 const CACHE_PREFIX = 'parents-player-v';
-const CACHE = 'parents-player-v35';
+const CACHE = 'parents-player-v36';
 const MEDIA_CONTROLS_JS = './media-session-controls.js?v=4';
+const PUBLIC_DRIVE_JS = './public-drive-mode.js?v=1';
 const SHELL = [
   './',
   './index.html',
@@ -10,6 +11,7 @@ const SHELL = [
   './buddha-bg.png',
   './audio-storage.js?v=2',
   './oauth-gesture.js?v=5',
+  PUBLIC_DRIVE_JS,
   './reliability-guard.js?v=2',
   './playlist.js?v=2',
   './app.js?v=5',
@@ -42,7 +44,7 @@ self.addEventListener('activate', event => {
   );
 });
 
-async function injectMediaControls(response) {
+async function injectRuntimeHelpers(response) {
   if (!response) return response;
   const type = response.headers.get('content-type') || '';
   if (!type.includes('text/html')) return response;
@@ -51,9 +53,17 @@ async function injectMediaControls(response) {
   headers.delete('content-length');
   headers.delete('content-encoding');
   headers.delete('etag');
-  const html = text.includes('media-session-controls.js')
-    ? text
-    : text.replace('</body>', '  <script src="./media-session-controls.js?v=4" defer></script>\n</body>');
+
+  let html = text;
+  if (!html.includes('public-drive-mode.js')) {
+    html = html.replace(
+      '<script src="reliability-guard.js?v=2" defer></script>',
+      `  <script src="${PUBLIC_DRIVE_JS}" defer></script>\n  <script src="reliability-guard.js?v=2" defer></script>`
+    );
+  }
+  if (!html.includes('media-session-controls.js')) {
+    html = html.replace('</body>', `  <script src="${MEDIA_CONTROLS_JS}" defer></script>\n</body>`);
+  }
   return new Response(html, { status: response.status, statusText: response.statusText, headers });
 }
 
@@ -70,14 +80,14 @@ self.addEventListener('fetch', event => {
         const copy = response.clone();
         event.waitUntil(caches.open(CACHE).then(cache => cache.put(event.request, copy)));
       }
-      return event.request.mode === 'navigate' ? injectMediaControls(response) : response;
+      return event.request.mode === 'navigate' ? injectRuntimeHelpers(response) : response;
     } catch (error) {
       const cached = await caches.match(event.request);
-      if (cached) return event.request.mode === 'navigate' ? injectMediaControls(cached) : cached;
+      if (cached) return event.request.mode === 'navigate' ? injectRuntimeHelpers(cached) : cached;
 
       if (event.request.mode === 'navigate') {
         const fallback = (await caches.match('./index.html')) || (await caches.match('./'));
-        return injectMediaControls(fallback);
+        return injectRuntimeHelpers(fallback);
       }
 
       throw error;
