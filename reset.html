@@ -23,7 +23,6 @@
   <script>
     (() => {
       'use strict';
-
       const DB_NAMES = ['parents-player-audio-db', 'parents-player-db'];
       const LOCAL_KEYS = [
         'parentsPlayerSettings',
@@ -32,6 +31,7 @@
         'parentsPlayerRepeatMode',
         'parentsPlayerPlaylistV1',
         'parentsPlayerViewMode',
+        'parentsPlayerPublicApiKey',
         'parentsPlayerGoogleAccessToken',
         'parentsPlayerGoogleAuthorized',
         'parentsPlayerGoogleForceConsent'
@@ -39,10 +39,7 @@
       const STATUS = document.getElementById('status');
       const DETAIL = document.getElementById('detail');
 
-      function sleep(ms) {
-        return new Promise(resolve => setTimeout(resolve, ms));
-      }
-
+      const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
       function formatBytes(value) {
         const n = Number(value || 0);
         if (!Number.isFinite(n) || n <= 0) return '0 MB';
@@ -50,16 +47,12 @@
         if (n >= 1024 ** 2) return `${(n / 1024 ** 2).toFixed(1)} MB`;
         return `${Math.round(n / 1024)} KB`;
       }
-
       async function estimateUsage() {
         try {
           const estimate = await navigator.storage?.estimate?.();
           return Number.isFinite(estimate?.usage) ? estimate.usage : null;
-        } catch {
-          return null;
-        }
+        } catch { return null; }
       }
-
       function deleteDatabaseOnce(name) {
         return new Promise((resolve, reject) => {
           const request = indexedDB.deleteDatabase(name);
@@ -68,67 +61,45 @@
           request.onblocked = () => reject(new Error(`${name}이 다른 불경 듣기 창에서 사용 중입니다.`));
         });
       }
-
       async function deleteDatabase(name) {
         let lastError = null;
         for (let attempt = 0; attempt < 5; attempt += 1) {
-          try {
-            await deleteDatabaseOnce(name);
-            return;
-          } catch (error) {
-            lastError = error;
-            await sleep(150 * (attempt + 1));
-          }
+          try { await deleteDatabaseOnce(name); return; }
+          catch (error) { lastError = error; await sleep(150 * (attempt + 1)); }
         }
         throw lastError || new Error(`${name} 삭제에 실패했습니다.`);
       }
-
       async function reset() {
         const before = await estimateUsage();
-
         for (const name of DB_NAMES) {
           DETAIL.textContent = `${name} 삭제 중…`;
           await deleteDatabase(name);
         }
-
         for (const key of LOCAL_KEYS) localStorage.removeItem(key);
         for (let i = sessionStorage.length - 1; i >= 0; i -= 1) {
           const key = sessionStorage.key(i);
           if (key && /^parentsPlayer/i.test(key)) sessionStorage.removeItem(key);
         }
-
         if ('caches' in window) {
           const cacheKeys = await caches.keys();
-          await Promise.all(
-            cacheKeys
-              .filter(key => key.startsWith('parents-player-v'))
-              .map(key => caches.delete(key))
-          );
+          await Promise.all(cacheKeys.filter(key => key.startsWith('parents-player-v')).map(key => caches.delete(key)));
         }
-
         if ('serviceWorker' in navigator) {
           try {
             const registrations = await navigator.serviceWorker.getRegistrations();
             const scope = `${location.origin}/parents-player/`;
-            await Promise.all(
-              registrations
-                .filter(registration => registration.scope.startsWith(scope))
-                .map(registration => registration.unregister())
-            );
+            await Promise.all(registrations.filter(registration => registration.scope.startsWith(scope)).map(registration => registration.unregister()));
           } catch {}
         }
-
         await sleep(500);
         const after = await estimateUsage();
         const beforeText = before == null ? '확인 불가' : formatBytes(before);
         const afterText = after == null ? '확인 불가' : formatBytes(after);
-
         STATUS.textContent = '초기화가 완료되었습니다.';
         DETAIL.textContent = `브라우저 저장공간 추정치: ${beforeText} → ${afterText}`;
         await sleep(900);
         location.replace(`./?fresh=${Date.now()}`);
       }
-
       reset().catch(error => {
         console.error(error);
         STATUS.textContent = '초기화를 완료하지 못했습니다.';
