@@ -1,6 +1,6 @@
 const CACHE_PREFIX = 'parents-player-v';
-const CACHE_NAME = 'parents-player-v39';
-const SHELL = ['./', './index.html', './manifest.json?v=6', './app-icon.png', './styles.css?v=11', './background.css?v=1', './playlist.css?v=4', './audio-storage.js?v=3', './playlist.js?v=3', './app.js?v=7', './ui-fixes.js?v=3', './media-session-controls.js?v=5', './now-playing-fullscreen.js?v=2', './buddha-bg.png', './reset.html'];
+const CACHE_NAME = 'parents-player-v40';
+const SHELL = ['./', './index.html', './manifest.json?v=6', './app-icon.png', './styles.css?v=11', './background.css?v=1', './playlist.css?v=4', './audio-storage.js?v=3', './playlist.js?v=3', './drive-key-bootstrap.js?v=1', './app.js?v=8', './ui-fixes.js?v=3', './media-session-controls.js?v=5', './now-playing-fullscreen.js?v=2', './buddha-bg.png', './reset.html'];
 
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.addAll(SHELL)).then(() => self.skipWaiting()));

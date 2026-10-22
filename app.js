@@ -55,6 +55,22 @@
     return /^AIza[\w-]{20,}$/.test(String(value || '').trim());
   }
 
+  let keyModule = null;
+  function ensureDriveKey() {
+    if (window.ParentsDriveKey) return window.ParentsDriveKey.ensureReady();
+    if (!keyModule) keyModule = new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = './drive-key-bootstrap.js?v=1';
+      script.onload = () => {
+        if (window.ParentsDriveKey) resolve(window.ParentsDriveKey);
+        else { keyModule = null; script.remove(); reject(new Error('연결 설정을 불러오지 못했습니다.')); }
+      };
+      script.onerror = () => { keyModule = null; script.remove(); reject(new Error('인터넷 연결 후 다시 업데이트해 주세요.')); };
+      document.head.appendChild(script);
+    });
+    return keyModule.then(module => module.ensureReady());
+  }
+
   function cleanLegacyAuthState() {
     localStorage.removeItem('parentsPlayerGoogleAccessToken');
     localStorage.removeItem('parentsPlayerGoogleAuthorized');
@@ -312,8 +328,8 @@
     await updateStorageEstimate();
     if (els.driveStorageStatus) {
       if (!navigator.onLine) els.driveStorageStatus.textContent = '오프라인';
-      else if (validApiKey()) els.driveStorageStatus.textContent = 'API 키 저장됨';
-      else els.driveStorageStatus.textContent = 'API 키 필요';
+      else if (validApiKey()) els.driveStorageStatus.textContent = '연결 준비됨';
+      else els.driveStorageStatus.textContent = '업데이트 시 자동 연결';
     }
   }
 
@@ -369,8 +385,9 @@
   }
 
   async function driveFetch(url, options = {}) {
+    if (!validApiKey()) await ensureDriveKey();
     const key = readApiKey();
-    if (!validApiKey(key)) throw new Error('설정에서 Google Drive API 키를 한 번 저장해 주세요.');
+    if (!validApiKey(key)) throw new Error('연결 설정을 확인하지 못했습니다. 다시 업데이트해 주세요.');
 
     const target = new URL(url);
     target.searchParams.set('key', key);
