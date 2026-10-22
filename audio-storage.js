@@ -63,12 +63,13 @@
         }
       };
       request.onsuccess = () => {
-        audioDb = request.result;
-        audioDb.onversionchange = () => {
-          try { audioDb?.close(); } catch {}
-          audioDb = null;
+        const connection = request.result;
+        audioDb = connection;
+        connection.onversionchange = () => {
+          connection.close();
+          if (audioDb === connection) audioDb = null;
         };
-        resolve(audioDb);
+        resolve(connection);
       };
       request.onerror = () => reject(request.error || new Error('오프라인 오디오 저장공간을 열지 못했습니다.'));
       request.onblocked = () => reject(new Error('다른 불경 듣기 창을 닫고 다시 시도해 주세요.'));
@@ -80,9 +81,9 @@
       try {
         const db = await openAudioDb();
         const transaction = db.transaction(AUDIO_STORE, mode);
+        const committed = transactionPromise(transaction);
         const request = makeRequest(transaction.objectStore(AUDIO_STORE));
-        const result = await requestPromise(request);
-        if (mode === 'readwrite') await transactionPromise(transaction);
+        const [result] = await Promise.all([requestPromise(request), committed]);
         return result;
       } catch (error) {
         const name = String(error?.name || '');
@@ -142,14 +143,15 @@
     });
   }
 
-  async function rebuildMainDatabaseWithLibrary(libraryRows) {
-    await deleteDatabaseByName(MAIN_DB_NAME);
-    const db = await openMainDb();
+  async function clearLegacyAudio() {
+    const connection = await openMainDb();
     try {
-      await writeRows(db, LIBRARY_STORE, libraryRows);
-    } finally {
-      db.close();
-    }
+      if (!connection.objectStoreNames.contains(AUDIO_STORE)) return;
+      const transaction = connection.transaction(AUDIO_STORE, 'readwrite');
+      const committed = transactionPromise(transaction);
+      transaction.objectStore(AUDIO_STORE).clear();
+      await committed;
+    } finally { connection.close(); }
   }
 
   async function legacyAudioRows() {
@@ -224,10 +226,9 @@
         }
       }
 
-      // Recreate the historical shared DB only after every legacy audio ID is
-      // safely represented in the dedicated DB. This drops the old audio store
-      // and any empty-but-allocated backing space while preserving the library.
-      await rebuildMainDatabaseWithLibrary(libraryRows);
+      // Clear legacy audio only after copy verification. Never delete/recreate
+      // the metadata DB: interruption must not lose the library snapshot.
+      await clearLegacyAudio();
       legacyFallback = false;
       return { migrated, cleanedLegacyDatabase: true, fallback: false };
     } catch (error) {
@@ -306,7 +307,7 @@
 
     await deleteDatabaseByName(AUDIO_DB_NAME);
     if (hasLegacyAudioStore) {
-      await rebuildMainDatabaseWithLibrary(libraryRows);
+      await clearLegacyAudio();
     }
     legacyFallback = false;
 

@@ -9,7 +9,7 @@
   const SPEED_KEY = 'parentsPlayerPlaybackSpeed';
   const POSITION_KEY = 'parentsPlayerPositions';
   const REPEAT_KEY = 'parentsPlayerRepeatMode';
-  const SUPPORTED_MIMES = new Set(['audio/mpeg', 'audio/mp4', 'audio/x-m4a', 'audio/aac', 'audio/flac', 'audio/x-flac']);
+  const SUPPORTED_MIMES = new Set(['audio/mpeg', 'audio/mp4', 'audio/x-m4a', 'audio/aac', 'audio/flac', 'audio/x-flac', 'audio/wav', 'audio/x-wav']);
 
   const els = Object.fromEntries([
     'syncBtn','settingsBtn','statusTitle','statusDetail','trackCount','trackList','emptyState','player','nowTitle','nowStatus',
@@ -24,7 +24,8 @@
   let currentId = null;
   let currentUrl = null;
   let seekDragging = false;
-  let savePositionTimer = null;
+  let operationBusy = false;
+  let playbackGeneration = 0;
   let settings = loadSettings();
   let playbackSpeed = Number(localStorage.getItem(SPEED_KEY) || '1') === 2 ? 2 : 1;
   let repeatMode = normalizeRepeat(localStorage.getItem(REPEAT_KEY) || 'all');
@@ -80,26 +81,57 @@
     return h ? `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}` : `${m}:${String(sec).padStart(2, '0')}`;
   }
 
-  function loadPositions() {
+  // New track selections always start at zero; pause/play keeps the loaded position.
+  function removePosition() { localStorage.removeItem(POSITION_KEY); }
+
+  async function runOperation(action) {
+    if (operationBusy) return;
+    operationBusy = true;
+    els.deleteOfflineBtn.disabled = true;
+    els.syncBtn.disabled = true;
+    els.saveSettingsBtn.disabled = true;
+    if (els.factoryResetBtn) els.factoryResetBtn.disabled = true;
+    const run = async () => {
+      await audioStorage().ready;
+      if (!db) db = await openDb();
+      await reloadLocal();
+      return action();
+    };
     try {
-      const value = JSON.parse(localStorage.getItem(POSITION_KEY) || '{}');
-      return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
-    } catch {
-      return {};
+      // Also serialize separate tabs of this app, without locking sibling apps.
+      if (navigator.locks?.request) return await navigator.locks.request(DB_NAME + '-mutation', run);
+      return await run();
+    } catch (error) {
+      console.error(error);
+      try { await reloadLocal(); } catch {}
+      updateStatus('작업을 완료하지 못했습니다', error.message || '다시 시도해 주세요.');
+    } finally {
+      operationBusy = false;
+      els.deleteOfflineBtn.disabled = false;
+      els.syncBtn.disabled = false;
+      els.saveSettingsBtn.disabled = false;
+      if (els.factoryResetBtn) els.factoryResetBtn.disabled = false;
+      render();
     }
   }
 
-  function savePosition(id, time) {
-    if (!id || !Number.isFinite(time) || time < 0) return;
-    const positions = loadPositions();
-    positions[id] = Math.floor(time);
-    localStorage.setItem(POSITION_KEY, JSON.stringify(positions));
+  async function removeLocalTrack(id) {
+    if (currentId === id) stopPlayer();
+    await dbDelete('audio', id);
+    if (await audioStorage().get(id)) throw new Error('오디오 삭제를 확인하지 못했습니다. 다시 시도해 주세요.');
+    audioRows.delete(id);
+    // Metadata stays recoverable until the separate audio deletion is verified.
+    await dbDelete('library', id);
+    removePosition(id);
   }
 
-  function removePosition(id) {
-    const positions = loadPositions();
-    delete positions[id];
-    localStorage.setItem(POSITION_KEY, JSON.stringify(positions));
+  async function resumeAudio() {
+    const generation = playbackGeneration;
+    try { await els.audio.play(); }
+    catch (error) {
+      if (generation !== playbackGeneration || error.name === 'AbortError') return;
+      updateStatus('재생하지 못했습니다', '재생 버튼을 다시 눌러 주세요. ' + (error.message || ''));
+    }
   }
 
   function openDb() {
@@ -109,7 +141,12 @@
         const idb = req.result;
         if (!idb.objectStoreNames.contains('library')) idb.createObjectStore('library', { keyPath: 'id' });
       };
-      req.onsuccess = () => resolve(req.result);
+      req.onsuccess = () => {
+        const connection = req.result;
+        connection.onversionchange = () => { connection.close(); if (db === connection) db = null; };
+        resolve(connection);
+      };
+      req.onblocked = () => reject(new Error('다른 앱 창을 닫고 다시 시도해 주세요.'));
       req.onerror = () => reject(req.error);
     });
   }
@@ -143,8 +180,14 @@
     for (let attempt = 0; attempt < 2; attempt += 1) {
       try {
         if (!db) db = await openDb();
-        const objectStore = db.transaction(store, mode).objectStore(store);
-        return await reqP(makeRequest(objectStore));
+        const transaction = db.transaction(store, mode);
+        const committed = new Promise((resolve, reject) => {
+          transaction.oncomplete = resolve;
+          transaction.onabort = () => reject(transaction.error || new Error('저장 작업이 취소되었습니다.'));
+          transaction.onerror = () => reject(transaction.error || new Error('저장하지 못했습니다.'));
+        });
+        const [result] = await Promise.all([reqP(makeRequest(transaction.objectStore(store))), committed]);
+        return result;
       } catch (error) {
         if (attempt === 0 && isRecoverableDbError(error)) {
           await reopenDb();
@@ -214,7 +257,7 @@
     const expected = Number(track.size || 0);
     if (actual <= 0) return false;
     if (expected > 0 && actual !== expected) return false;
-    if (track.modifiedTime && row.modifiedTime && track.modifiedTime !== row.modifiedTime) return false;
+    if (track.modifiedTime && track.modifiedTime !== row.modifiedTime) return false;
     return true;
   }
 
@@ -269,7 +312,7 @@
     await updateStorageEstimate();
     if (els.driveStorageStatus) {
       if (!navigator.onLine) els.driveStorageStatus.textContent = '오프라인';
-      else if (validApiKey()) els.driveStorageStatus.textContent = '연결됨';
+      else if (validApiKey()) els.driveStorageStatus.textContent = 'API 키 저장됨';
       else els.driveStorageStatus.textContent = 'API 키 필요';
     }
   }
@@ -277,7 +320,7 @@
   function updateStatus(title, detail) {
     const offline = currentOfflineCount();
     const total = library.length;
-    els.statusTitle.textContent = title || (total ? '오프라인 재생 준비 완료' : '저장된 불경이 없습니다');
+    els.statusTitle.textContent = title || (total ? (offline === total ? '오프라인 재생 준비 완료' : '다운로드가 필요합니다') : '저장된 불경이 없습니다');
     els.statusDetail.textContent = detail != null
       ? detail
       : total ? `${offline}/${total}개 저장됨 · ${fmtBytes(totalOfflineBytes())}` : '불경 업데이트를 눌러 Google Drive에서 받아오세요.';
@@ -331,7 +374,7 @@
 
     const target = new URL(url);
     target.searchParams.set('key', key);
-    const response = await fetch(target.toString(), options);
+    const response = await fetch(target.toString(), { ...options, signal: AbortSignal.timeout(90000), cache: 'no-store' });
     if (!response.ok) {
       let message = '';
       try { message = (await response.json())?.error?.message || ''; } catch {}
@@ -344,16 +387,22 @@
     const folderId = settings.folderId || DEFAULT_FOLDER_ID;
     const files = [];
     let pageToken = '';
+    const seenPages = new Set();
     do {
       const q = encodeURIComponent(`'${folderId}' in parents and trashed=false`);
-      const fields = encodeURIComponent('nextPageToken,files(id,name,mimeType,size,createdTime,modifiedTime)');
+      const fields = encodeURIComponent('nextPageToken,incompleteSearch,files(id,name,mimeType,size,createdTime,modifiedTime)');
       const page = pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : '';
       const url = `https://www.googleapis.com/drive/v3/files?q=${q}&fields=${fields}&pageSize=1000&orderBy=name${page}`;
       const json = await (await driveFetch(url)).json();
-      files.push(...(json.files || []));
+      if (json.incompleteSearch || !Array.isArray(json.files) || json.files.some(file => !file.id || typeof file.name !== 'string')) {
+        throw new Error('Drive 목록이 불완전합니다. 저장된 파일을 유지했습니다.');
+      }
+      files.push(...json.files);
       pageToken = json.nextPageToken || '';
+      if (pageToken && seenPages.has(pageToken)) throw new Error('Drive 페이지를 확인하지 못했습니다.');
+      seenPages.add(pageToken);
     } while (pageToken);
-    return files.filter(file => SUPPORTED_MIMES.has(file.mimeType) || /\.(mp3|m4a|aac|flac)$/i.test(file.name));
+    return files.filter(file => SUPPORTED_MIMES.has(file.mimeType) || /\.(mp3|m4a|aac|flac|wav)$/i.test(file.name));
   }
 
   async function downloadTrack(track) {
@@ -373,6 +422,10 @@
   }
 
   async function syncLibrary() {
+    return runOperation(syncLibraryNow);
+  }
+
+  async function syncLibraryNow() {
     if (!navigator.onLine) {
       updateStatus('오프라인 상태입니다');
       return;
@@ -394,11 +447,7 @@
 
       for (const old of library) {
         if (!incomingIds.has(old.id)) {
-          await dbDelete('library', old.id);
-          await dbDelete('audio', old.id);
-          audioRows.delete(old.id);
-          removePosition(old.id);
-          if (currentId === old.id) stopPlayer();
+          await removeLocalTrack(old.id);
         }
       }
 
@@ -422,21 +471,22 @@
         try { await navigator.storage.persist(); } catch {}
       }
 
+      const failures = [];
       for (let i = 0; i < needsDownload.length; i++) {
         const track = needsDownload[i];
         updateStatus(`다운로드 중 ${i + 1}/${needsDownload.length}`, cleanTitle(track.name));
-        await downloadTrack(track);
+        try { await downloadTrack(track); } catch (error) { failures.push(error.message || cleanTitle(track.name)); }
         render();
         updateOfflineStats();
       }
 
       await reloadLocal();
+      if (failures.length) throw new Error(`${failures.length}개 다운로드 실패 · 업데이트를 다시 누르면 이어서 받습니다. ${failures[0]}`);
       updateStatus('모든 불경이 최신 상태입니다');
     } catch (error) {
       console.error(error);
       updateStatus('업데이트하지 못했습니다', error.message || '다시 시도해 주세요.');
     } finally {
-      els.syncBtn.disabled = false;
       els.syncBtn.textContent = '불경 업데이트';
     }
   }
@@ -481,6 +531,8 @@
   }
 
   function stopPlayer() {
+    playbackGeneration += 1;
+    els.audio.onloadedmetadata = null;
     try { els.audio.pause(); } catch {}
     els.audio.removeAttribute('src');
     try { els.audio.load(); } catch {}
@@ -505,27 +557,30 @@
       return;
     }
 
-    if (currentId && Number.isFinite(els.audio.currentTime)) savePosition(currentId, els.audio.currentTime);
-    if (currentUrl) URL.revokeObjectURL(currentUrl);
+    const previousUrl = currentUrl;
 
     const stale = !rowIsCurrent(track, row);
     currentId = id;
     currentUrl = audioValueToUrl(row.blob);
     els.audio.src = currentUrl;
+    try { els.audio.currentTime = 0; } catch {}
     els.audio.playbackRate = playbackSpeed;
     els.nowTitle.textContent = cleanTitle(track.name);
     els.player.classList.remove('hidden');
     updateNowStatus(stale);
     render();
 
-    els.audio.onloadedmetadata = async () => {
-      const saved = Number(loadPositions()[id] || 0);
-      if (saved > 0 && saved < els.audio.duration - 10) els.audio.currentTime = saved;
+    const generation = ++playbackGeneration;
+    els.audio.onloadedmetadata = () => {
+      if (generation !== playbackGeneration) return;
       els.timeTotal.textContent = fmtTime(els.audio.duration);
       updateSeek();
       updateMediaPosition();
-      try { await els.audio.play(); } catch {}
     };
+    // Start inside the tap/ended handler, rather than waiting for metadata.
+    // Replacing src starts a fresh resource at 0:00; pause/play does not reload it.
+    resumeAudio();
+    if (previousUrl) URL.revokeObjectURL(previousUrl);
 
     if ('mediaSession' in navigator) {
       try {
@@ -558,29 +613,33 @@
     } catch {}
   }
 
+  function playableQueue() { return library.filter(track => audioValueSize(audioRows.get(track.id)?.blob) > 0); }
+
   function currentIndex() {
-    return library.findIndex(item => item.id === currentId);
+    return playableQueue().findIndex(item => item.id === currentId);
   }
 
   function playNext(auto = false) {
-    if (!library.length || !currentId) return;
+    const queue = playableQueue();
+    if (!queue.length || !currentId) return;
     if (auto && repeatMode === 'one') return playTrack(currentId);
 
     const idx = currentIndex();
-    if (idx >= 0 && idx < library.length - 1) return playTrack(library[idx + 1].id);
-    if (repeatMode === 'all') return playTrack(library[0].id);
+    if (idx >= 0 && idx < queue.length - 1) return playTrack(queue[idx + 1].id);
+    if (repeatMode === 'all') return playTrack(queue[0].id);
   }
 
   function playPrev() {
-    if (!library.length || !currentId) return;
+    const queue = playableQueue();
+    if (!queue.length || !currentId) return;
     if ((els.audio.currentTime || 0) > 3) {
       els.audio.currentTime = 0;
       return;
     }
 
     const idx = currentIndex();
-    if (idx > 0) return playTrack(library[idx - 1].id);
-    if (repeatMode === 'all') return playTrack(library[library.length - 1].id);
+    if (idx > 0) return playTrack(queue[idx - 1].id);
+    if (repeatMode === 'all') return playTrack(queue[queue.length - 1].id);
     els.audio.currentTime = 0;
   }
 
@@ -593,6 +652,10 @@
   }
 
   async function deleteAllOfflineAudio() {
+    return runOperation(deleteAllOfflineAudioNow);
+  }
+
+  async function deleteAllOfflineAudioNow() {
     const count = storedAudioCount();
     const size = storedAudioBytes();
     const description = count
@@ -605,7 +668,6 @@
     );
     if (!confirmed) return;
 
-    els.deleteOfflineBtn.disabled = true;
     if (els.storageResult) els.storageResult.textContent = '오프라인 오디오 저장공간을 삭제하는 중…';
     try {
       stopPlayer();
@@ -632,7 +694,6 @@
       if (els.storageResult) els.storageResult.textContent = '완전한 삭제를 확인하지 못했습니다.';
       updateStatus('오프라인 오디오를 삭제하지 못했습니다', error.message || '다시 시도해 주세요.');
     } finally {
-      els.deleteOfflineBtn.disabled = false;
       updateOfflineStats();
     }
   }
@@ -651,12 +712,12 @@
     els.audio.currentTime = Math.min(els.audio.duration || Infinity, (els.audio.currentTime || 0) + 15);
   });
   els.playBtn.addEventListener('click', () => {
-    if (!currentId && library[0]) return playTrack(library[0].id);
-    els.audio.paused ? els.audio.play() : els.audio.pause();
+    if (!currentId && playableQueue()[0]) return playTrack(playableQueue()[0].id);
+    els.audio.paused ? resumeAudio() : els.audio.pause();
   });
 
   els.saveSettingsBtn.addEventListener('click', () => {
-    const nextKey = String(els.apiKeyInput?.value || '').trim();
+    const nextKey = els.apiKeyInput ? els.apiKeyInput.value.trim() : readApiKey();
     if (nextKey && !validApiKey(nextKey)) {
       alert('Google Drive API 키 형식이 올바르지 않습니다. AIza로 시작하는 키를 확인해 주세요.');
       return;
@@ -695,21 +756,22 @@
   els.audio.addEventListener('timeupdate', () => {
     updateSeek();
     updateMediaPosition();
-    if (!currentId) return;
-    clearTimeout(savePositionTimer);
-    savePositionTimer = setTimeout(() => savePosition(currentId, els.audio.currentTime), 500);
+
   });
 
   els.audio.addEventListener('play', () => {
-    els.playBtn.textContent = '❚❚';
+    els.playBtn.textContent = '';
+    els.playBtn.dataset.state = 'pause';
+    els.playBtn.setAttribute('aria-label', '일시정지');
     if ('mediaSession' in navigator) {
       try { navigator.mediaSession.playbackState = 'playing'; } catch {}
     }
   });
 
   els.audio.addEventListener('pause', () => {
-    els.playBtn.textContent = '▶';
-    if (currentId) savePosition(currentId, els.audio.currentTime);
+    els.playBtn.textContent = '';
+    els.playBtn.dataset.state = 'play';
+    els.playBtn.setAttribute('aria-label', '재생');
     if ('mediaSession' in navigator) {
       try { navigator.mediaSession.playbackState = 'paused'; } catch {}
     }
@@ -725,7 +787,7 @@
 
   if ('mediaSession' in navigator) {
     try {
-      navigator.mediaSession.setActionHandler('play', () => els.audio.play());
+      navigator.mediaSession.setActionHandler('play', resumeAudio);
       navigator.mediaSession.setActionHandler('pause', () => els.audio.pause());
       navigator.mediaSession.setActionHandler('previoustrack', playPrev);
       navigator.mediaSession.setActionHandler('nexttrack', () => playNext(false));
@@ -741,13 +803,20 @@
     } catch {}
   }
 
+  els.audio.addEventListener('error', () => {
+    if (currentId) updateStatus('오디오를 재생하지 못했습니다', '다른 곡을 선택하거나 업데이트를 다시 눌러 주세요.');
+  });
+  window.addEventListener('pageshow', () => {
+    if (!operationBusy && db) runOperation(async () => {}).catch(() => {});
+  });
+
   window.addEventListener('beforeunload', () => {
-    if (currentId) savePosition(currentId, els.audio.currentTime);
     if (currentUrl) URL.revokeObjectURL(currentUrl);
   });
 
   async function boot() {
     cleanLegacyAuthState();
+    removePosition();
     saveSettings();
 
     if ('serviceWorker' in navigator) {
@@ -766,7 +835,7 @@
     await reloadLocal();
 
     if (navigator.onLine) {
-      updateStatus(library.length ? '오프라인 재생 준비 완료' : '처음에는 불경 업데이트를 눌러 주세요');
+      updateStatus(library.length ? undefined : '처음에는 불경 업데이트를 눌러 주세요');
     } else {
       updateStatus('오프라인 상태입니다');
     }
