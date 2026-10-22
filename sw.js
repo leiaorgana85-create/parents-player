@@ -1,5 +1,5 @@
 const CACHE_PREFIX = 'parents-player-v';
-const CACHE = 'parents-player-v37';
+const CACHE = 'parents-player-v38';
 const MEDIA_CONTROLS_JS = './media-session-controls.js?v=4';
 const SHELL = [
   './',
