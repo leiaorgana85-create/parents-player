@@ -230,7 +230,7 @@
   }, true);
 
   function playlistQueue() {
-    return playlistRows();
+    return playlistRows().filter(row => row.querySelector('.offline-mark')?.textContent.trim() !== '↓');
   }
 
   function playlistNext({ ended = false } = {}) {

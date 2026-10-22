@@ -77,5 +77,5 @@
   });
   closeBtn.addEventListener('click', event => { event.preventDefault(); event.stopPropagation(); closeFullscreen(); });
   document.addEventListener('keydown', event => { if (event.key === 'Escape') closeFullscreen(); });
-  new MutationObserver(() => { if (player.classList.contains('hidden')) closeFullscreen(); }).observe(player, { attributes: true, attributeFilter: ['class'] });
+  new MutationObserver(() => { if (player.classList.contains('hidden') && player.classList.contains('expanded')) closeFullscreen(); }).observe(player, { attributes: true, attributeFilter: ['class'] });
 })();
