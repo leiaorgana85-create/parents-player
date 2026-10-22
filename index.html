@@ -40,25 +40,22 @@
       <section class="settings-section settings-first">
         <div class="settings-section-title">저장공간</div>
         <div class="settings-row"><span class="settings-row-label">오프라인 오디오</span><span id="offlineStats" class="settings-row-value">0개 · 0 MB</span></div>
-        <div class="settings-storage-path">정확한 오디오 저장소: <strong>parents-player-audio-db → audio</strong></div>
-        <div class="settings-row"><span class="settings-row-label">브라우저 저장공간 추정치</span><span id="storageEstimate" class="settings-row-value">계산 중…</span></div>
-        <p class="help settings-note">오프라인 오디오는 정확한 값입니다. 브라우저 저장공간은 앱 캐시·데이터베이스 오버헤드와 같은 출처의 다른 웹 저장공간을 포함할 수 있는 추정치입니다.</p>
+        <div class="settings-row"><span class="settings-row-label">브라우저 저장공간</span><span id="storageEstimate" class="settings-row-value">계산 중…</span></div>
         <div class="settings-storage-actions"><button id="deleteOfflineBtn" type="button" class="button secondary full-width">모든 오프라인 오디오 삭제</button></div>
-        <p class="help settings-note">전체 삭제는 오디오 전용 데이터베이스 자체를 삭제한 뒤 새 빈 데이터베이스로 다시 만듭니다. Google Drive 원본과 불경 목록은 유지됩니다.</p><p id="storageResult" class="settings-storage-result"></p>
+        <p id="storageResult" class="settings-storage-result"></p>
       </section>
       <section class="settings-section">
         <div class="settings-section-title">Google Drive</div>
-        <div class="settings-row"><span class="settings-row-label">PLAYLIST 폴더</span><span id="driveStorageStatus" class="settings-row-value">설정됨</span></div>
-        <p class="help settings-note">불경 업데이트를 누르면 공개된 PLAYLIST 폴더를 읽고 필요한 파일을 오프라인으로 저장합니다. Google 로그인은 사용하지 않습니다.</p>
-        <p class="help settings-note"><a href="privacy.html" target="_blank" rel="noopener">개인정보처리방침</a></p>
+        <div class="settings-row"><span class="settings-row-label">연결 상태</span><span id="driveStorageStatus" class="settings-row-value">확인 중…</span></div>
+        <label class="field"><span>Google Drive API 키</span><input id="apiKeyInput" type="password" autocomplete="off" spellcheck="false" /></label>
+        <button id="saveSettingsBtn" type="button" class="button secondary full-width">API 키 저장</button>
       </section>
       <details class="settings-section settings-advanced">
-        <summary>고급 설정</summary><p class="help">일반적으로 변경할 필요가 없습니다.</p>
-        <label class="field"><span>Google Drive API 키</span><input id="apiKeyInput" type="password" autocomplete="off" spellcheck="false" /></label>
+        <summary>고급 설정</summary>
         <label class="field"><span>Google Drive 폴더 ID</span><input id="folderIdInput" type="text" autocomplete="off" /></label>
-        <button id="saveSettingsBtn" type="button" class="button secondary full-width">고급 설정 저장</button>
+        <button type="button" class="button secondary full-width" onclick="document.getElementById('saveSettingsBtn').click()">폴더 설정 저장</button>
       </details>
-      <details class="settings-section settings-troubleshooting"><summary>문제 해결</summary><p class="help settings-note">정상적인 오프라인 파일 삭제에는 위의 ‘모든 오프라인 오디오 삭제’을 사용하세요.</p><button id="factoryResetBtn" type="button" class="danger-btn">이 기기에서 불경 듣기 초기화</button><p class="help settings-note">로컬 목록, 오프라인 오디오, 재생 위치, 설정과 이 앱의 캐시를 모두 지우고 처음 상태로 시작합니다. Google Drive 원본은 삭제되지 않습니다.</p></details>
+      <details class="settings-section settings-troubleshooting"><summary>문제 해결</summary><button id="factoryResetBtn" type="button" class="danger-btn">이 기기에서 불경 듣기 초기화</button></details>
       <div class="dialog-actions"><button value="cancel" class="button secondary">닫기</button></div>
     </form>
   </dialog>
