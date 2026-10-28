@@ -57,19 +57,4 @@
     });
   }
 
-  if (!document.querySelector('script[data-zero-start-playback="1"]')) {
-    const script = document.createElement('script');
-    script.src = './playback-policy.js?v=1';
-    script.defer = true;
-    script.dataset.zeroStartPlayback = '1';
-    document.head.appendChild(script);
-  }
-
-  if (!document.querySelector('script[data-fullscreen-now-playing="1"]')) {
-    const script = document.createElement('script');
-    script.src = './now-playing-fullscreen.js?v=1';
-    script.defer = true;
-    script.dataset.fullscreenNowPlaying = '1';
-    document.head.appendChild(script);
-  }
 })();

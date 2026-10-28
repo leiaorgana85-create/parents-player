@@ -1,0 +1,7 @@
+{
+  "version": "v1.00",
+  "repository": "leiaorgana85-create/parents-player",
+  "url": "https://leiaorgana85-create.github.io/parents-player/",
+  "html": "index.html",
+  "worker": "sw.js"
+}

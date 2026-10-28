@@ -1,96 +1,39 @@
+// App version: v1.00
 const CACHE_PREFIX = 'parents-player-v';
-const CACHE = 'parents-player-v36';
-const MEDIA_CONTROLS_JS = './media-session-controls.js?v=4';
-const PUBLIC_DRIVE_JS = './public-drive-mode.js?v=1';
-const SHELL = [
-  './',
-  './index.html',
-  './styles.css?v=11',
-  './background.css?v=1',
-  './playlist.css?v=4',
-  './buddha-bg.png',
-  './audio-storage.js?v=2',
-  './oauth-gesture.js?v=5',
-  PUBLIC_DRIVE_JS,
-  './reliability-guard.js?v=2',
-  './playlist.js?v=2',
-  './app.js?v=5',
-  './ui-fixes.js?v=2',
-  './playback-policy.js?v=1',
-  './now-playing-fullscreen.js?v=1',
-  MEDIA_CONTROLS_JS,
-  './reset.html',
-  './manifest.json?v=6',
-  './app-icon.png'
-];
+const CACHE_NAME = 'parents-player-v43';
+const SHELL = ['./', './index.html', './manifest.json?v=6', './app-icon.png', './styles.css?v=11', './background.css?v=1', './playlist.css?v=4', './audio-storage.js?v=3', './playlist.js?v=3', './drive-key-bootstrap.js?v=1', './app.js?v=9', './ui-fixes.js?v=3', './media-session-controls.js?v=5', './now-playing-fullscreen.js?v=2', './buddha-bg.png', './reset.html'];
 
 self.addEventListener('install', event => {
-  event.waitUntil(
-    caches.open(CACHE)
-      .then(cache => cache.addAll(SHELL))
-      .then(() => self.skipWaiting())
-  );
+  event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.addAll(SHELL.map(path => new Request(new URL(path, self.location.href), { cache: 'reload' })))).then(() => self.skipWaiting()));
 });
-
 self.addEventListener('activate', event => {
-  event.waitUntil(
-    caches.keys()
-      .then(keys => Promise.all(
-        keys
-          .filter(key => key.startsWith(CACHE_PREFIX) && key !== CACHE)
-          .map(key => caches.delete(key))
-      ))
-      .then(() => self.clients.claim())
-  );
+  event.waitUntil((async () => {
+    const names = await caches.keys();
+    await Promise.all(names.filter(name => name.startsWith(CACHE_PREFIX) && name !== CACHE_NAME).map(name => caches.delete(name)));
+    await self.clients.claim();
+  })());
 });
-
-async function injectRuntimeHelpers(response) {
-  if (!response) return response;
-  const type = response.headers.get('content-type') || '';
-  if (!type.includes('text/html')) return response;
-  const text = await response.text();
-  const headers = new Headers(response.headers);
-  headers.delete('content-length');
-  headers.delete('content-encoding');
-  headers.delete('etag');
-
-  let html = text;
-  if (!html.includes('public-drive-mode.js')) {
-    html = html.replace(
-      '<script src="reliability-guard.js?v=2" defer></script>',
-      `  <script src="${PUBLIC_DRIVE_JS}" defer></script>\n  <script src="reliability-guard.js?v=2" defer></script>`
-    );
-  }
-  if (!html.includes('media-session-controls.js')) {
-    html = html.replace('</body>', `  <script src="${MEDIA_CONTROLS_JS}" defer></script>\n</body>`);
-  }
-  return new Response(html, { status: response.status, statusText: response.statusText, headers });
-}
-
 self.addEventListener('fetch', event => {
-  if (event.request.method !== 'GET') return;
-
-  const url = new URL(event.request.url);
-  if (url.origin !== self.location.origin) return;
-
+  const request = event.request;
+  const url = new URL(request.url);
+  const scope = new URL('./', self.location.href);
+  if (request.method !== 'GET' || url.origin !== scope.origin || !url.pathname.startsWith(scope.pathname)) return;
   event.respondWith((async () => {
+    const cache = await caches.open(CACHE_NAME);
+    // Use this complete installed shell immediately, even on a stalled network.
+    const saved = await cache.match(request, { ignoreSearch: true });
+    if (saved) return saved;
     try {
-      const response = await fetch(event.request);
-      if (response && response.ok) {
-        const copy = response.clone();
-        event.waitUntil(caches.open(CACHE).then(cache => cache.put(event.request, copy)));
-      }
-      return event.request.mode === 'navigate' ? injectRuntimeHelpers(response) : response;
+      const response = await fetch(request);
+      if (response.ok) event.waitUntil(cache.put(request, response.clone()).catch(() => {}));
+      if (response.ok || request.mode !== 'navigate') return response;
     } catch (error) {
-      const cached = await caches.match(event.request);
-      if (cached) return event.request.mode === 'navigate' ? injectRuntimeHelpers(cached) : cached;
-
-      if (event.request.mode === 'navigate') {
-        const fallback = (await caches.match('./index.html')) || (await caches.match('./'));
-        return injectRuntimeHelpers(fallback);
-      }
-
-      throw error;
+      if (request.mode !== 'navigate') return Response.error();
     }
+    if (request.mode === 'navigate') {
+      const fallback = await cache.match('./index.html');
+      if (fallback) return fallback;
+    }
+    return Response.error();
   })());
 });
